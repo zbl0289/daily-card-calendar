@@ -179,11 +179,8 @@ class DailyCardCalendarView extends ItemView {
 
   indexDailyNotes() {
     const map = new Map();
-    const folder = this.getDailyFolder();
 
     for (const file of this.app.vault.getMarkdownFiles()) {
-      if (folder && !file.path.startsWith(folder + "/")) continue;
-
       const cache = this.app.metadataCache.getFileCache(file);
       const frontmatterDate = cache && cache.frontmatter && (
         cache.frontmatter.date ||
@@ -241,6 +238,9 @@ class DailyCardCalendarView extends ItemView {
       const parsed = moment(text, format, true);
       if (parsed.isValid()) return parsed;
     }
+
+    const fallback = moment(text);
+    if (fallback.isValid()) return fallback;
 
     const loose = text.match(/(20\d{2})[-/.年]?\s*(\d{1,2})[-/.月]?\s*(\d{1,2})/);
     if (!loose) return null;
