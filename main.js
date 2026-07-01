@@ -15,6 +15,7 @@ const VIEW_TYPE = "daily-card-calendar-view";
 const DEFAULT_SETTINGS = {
   dailyFolder: "",
   dateFormat: "YYYY-MM-DD",
+  applyTemplateToNewNotes: true,
   columns: 5,
 };
 
@@ -38,6 +39,12 @@ module.exports = class DailyCardCalendarPlugin extends Plugin {
     });
 
     this.addSettingTab(new DailyCardCalendarSettingTab(this.app, this));
+
+    this.registerEvent(
+      this.app.vault.on("create", (file) => {
+        this.applyTemplateToNewBlankNote(file);
+      })
+    );
 
     this.app.workspace.onLayoutReady(async () => {
       await this.openAsHomePage();
@@ -70,6 +77,110 @@ module.exports = class DailyCardCalendarPlugin extends Plugin {
     if (leftSplit && !leftSplit.collapsed && typeof leftSplit.collapse === "function") {
       leftSplit.collapse();
     }
+  }
+
+  async applyTemplateToNewBlankNote(file) {
+    if (!this.settings.applyTemplateToNewNotes) return;
+    if (!(file instanceof TFile) || file.extension !== "md") return;
+
+    const templatePath = this.getDailyTemplatePath();
+    if (!templatePath || file.path === templatePath) return;
+
+    const templatesFolder = this.getTemplatesFolder();
+    if (templatesFolder && file.path.startsWith(templatesFolder + "/")) return;
+
+    window.setTimeout(async () => {
+      const latest = this.app.vault.getAbstractFileByPath(file.path);
+      if (!(latest instanceof TFile)) return;
+
+      const content = await this.app.vault.cachedRead(latest);
+      if (content.trim()) return;
+
+      const day = moment();
+      const rendered = await this.renderDailyTemplate(day, latest.basename);
+      await this.app.vault.modify(latest, rendered);
+    }, 250);
+  }
+
+  normalizeFolder(folder) {
+    return (folder || "").trim().replace(/^\/+|\/+$/g, "");
+  }
+
+  getDailyNotesOptions() {
+    const dailyNotes = this.app.internalPlugins && this.app.internalPlugins.getPluginById("daily-notes");
+    return dailyNotes && dailyNotes.instance && dailyNotes.instance.options || {};
+  }
+
+  getTemplatesOptions() {
+    const templates = this.app.internalPlugins && this.app.internalPlugins.getPluginById("templates");
+    return templates && templates.instance && templates.instance.options || {};
+  }
+
+  getTemplatesFolder() {
+    return this.normalizeFolder(this.getTemplatesOptions().folder);
+  }
+
+  getDailyFolder() {
+    const configured = this.normalizeFolder(this.settings.dailyFolder);
+    if (configured) return configured;
+
+    return this.normalizeFolder(this.getDailyNotesOptions().folder);
+  }
+
+  getDailyTemplatePath() {
+    const template = this.getDailyNotesOptions().template;
+    if (!template) return "";
+
+    const normalized = template.trim().replace(/^\/+|\/+$/g, "");
+    return normalized.endsWith(".md") ? normalized : `${normalized}.md`;
+  }
+
+  async renderDailyTemplate(day, title) {
+    const templatePath = this.getDailyTemplatePath();
+    const templateFile = templatePath && this.app.vault.getAbstractFileByPath(templatePath);
+    let content = "";
+
+    if (templateFile instanceof TFile) {
+      content = await this.app.vault.cachedRead(templateFile);
+    } else {
+      content = [
+        "---",
+        `date: ${day.format("YYYY-MM-DD")}`,
+        "---",
+        "",
+        `# ${day.format("MMMM D, YYYY")}`,
+        "",
+      ].join("\n");
+    }
+
+    const rendered = this.renderTemplateVariables(content, day, title);
+    return this.ensureDateFrontmatter(rendered, day);
+  }
+
+  renderTemplateVariables(content, day, title) {
+    return content
+      .replace(/{{\s*date(?::([^}]+))?\s*}}/g, (_match, format) => {
+        return day.format((format || this.settings.dateFormat || "YYYY-MM-DD").trim());
+      })
+      .replace(/{{\s*time(?::([^}]+))?\s*}}/g, (_match, format) => {
+        return moment().format((format || "HH:mm").trim());
+      })
+      .replace(/{{\s*title\s*}}/g, title);
+  }
+
+  ensureDateFrontmatter(content, day) {
+    const dateLine = `date: ${day.format("YYYY-MM-DD")}`;
+
+    if (content.startsWith("---\n")) {
+      const end = content.indexOf("\n---", 4);
+      if (end !== -1) {
+        const frontmatter = content.slice(4, end);
+        if (/^date\s*:/m.test(frontmatter)) return content;
+        return `---\n${dateLine}\n${frontmatter}${content.slice(end)}`;
+      }
+    }
+
+    return `---\n${dateLine}\n---\n\n${content}`;
   }
 
   async saveSettings() {
@@ -208,16 +319,11 @@ class DailyCardCalendarView extends ItemView {
   }
 
   normalizeFolder(folder) {
-    return (folder || "").trim().replace(/^\/+|\/+$/g, "");
+    return this.plugin.normalizeFolder(folder);
   }
 
   getDailyFolder() {
-    const configured = this.normalizeFolder(this.plugin.settings.dailyFolder);
-    if (configured) return configured;
-
-    const dailyNotes = this.app.internalPlugins && this.app.internalPlugins.getPluginById("daily-notes");
-    const options = dailyNotes && dailyNotes.instance && dailyNotes.instance.options;
-    return this.normalizeFolder(options && options.folder);
+    return this.plugin.getDailyFolder();
   }
 
   parseDate(value) {
@@ -362,14 +468,7 @@ class DailyCardCalendarView extends ItemView {
 
     if (folder) await this.ensureFolder(folder);
 
-    const content = [
-      "---",
-      `date: ${day.format("YYYY-MM-DD")}`,
-      "---",
-      "",
-      `# ${day.format("MMMM D, YYYY")}`,
-      "",
-    ].join("\n");
+    const content = await this.plugin.renderDailyTemplate(day, day.format("MMMM D, YYYY"));
 
     return this.app.vault.create(path, content);
   }
@@ -421,6 +520,18 @@ class DailyCardCalendarSettingTab extends PluginSettingTab {
           .setValue(this.plugin.settings.dateFormat)
           .onChange(async (value) => {
             this.plugin.settings.dateFormat = value.trim() || DEFAULT_SETTINGS.dateFormat;
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName("Apply template to new blank notes")
+      .setDesc("When a new empty Markdown note is created, fill it with the same template used by Daily notes.")
+      .addToggle((toggle) =>
+        toggle
+          .setValue(Boolean(this.plugin.settings.applyTemplateToNewNotes))
+          .onChange(async (value) => {
+            this.plugin.settings.applyTemplateToNewNotes = value;
             await this.plugin.saveSettings();
           })
       );
