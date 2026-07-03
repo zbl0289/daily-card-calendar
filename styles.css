@@ -4,9 +4,11 @@
   --dcc-accent: var(--interactive-accent);
   --dcc-panel: var(--background-secondary);
   --dcc-card: var(--background-primary);
+  --dcc-card-min: 172px;
   height: 100%;
   padding: 14px;
   overflow: auto;
+  min-width: 0;
 }
 
 .dcc-toolbar {
@@ -23,12 +25,17 @@
   font-weight: 650;
 }
 
+.dcc-pinned-section,
 .dcc-week-section {
   display: grid;
   gap: 10px;
 }
 
-.dcc-week-heading {
+.dcc-pinned-section {
+  margin-bottom: 16px;
+}
+
+.dcc-section-heading {
   margin: 0;
   font-size: 15px;
   font-weight: 650;
@@ -43,8 +50,9 @@
 
 .dcc-grid {
   display: grid;
-  grid-template-columns: repeat(var(--dcc-columns), minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--dcc-card-min)), 1fr));
   gap: 12px;
+  min-width: 0;
 }
 
 .dcc-card {
@@ -60,11 +68,13 @@
 }
 
 .dcc-card:hover,
-.dcc-card.is-today {
+.dcc-card.is-today,
+.dcc-card.is-pinned {
   border-color: var(--dcc-accent);
 }
 
-.dcc-card.is-today {
+.dcc-card.is-today,
+.dcc-card.is-pinned {
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--dcc-accent) 35%, transparent);
 }
 
@@ -215,8 +225,8 @@
 }
 
 @media (max-width: 1100px) {
-  .dcc-grid {
-    grid-template-columns: repeat(3, minmax(170px, 1fr));
+  .dcc-root {
+    --dcc-card-min: 160px;
   }
 }
 
@@ -225,7 +235,7 @@
     padding: 10px;
   }
 
-  .dcc-grid {
-    grid-template-columns: 1fr;
+  .dcc-root {
+    --dcc-card-min: 100%;
   }
 }

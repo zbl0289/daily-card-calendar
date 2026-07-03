@@ -16,7 +16,8 @@ const DEFAULT_SETTINGS = {
   dailyFolder: "",
   dateFormat: "YYYY-MM-DD",
   applyTemplateToNewNotes: true,
-  columns: 5,
+  homeRightFile: "随机漫步.excalidraw.md",
+  cardMinWidth: 172,
 };
 
 module.exports = class DailyCardCalendarPlugin extends Plugin {
@@ -28,13 +29,13 @@ module.exports = class DailyCardCalendarPlugin extends Plugin {
       (leaf) => new DailyCardCalendarView(leaf, this)
     );
 
-    this.addRibbonIcon("calendar-days", "Open daily card calendar", () => {
+    this.addRibbonIcon("calendar-days", "Open Home page", () => {
       this.activateView();
     });
 
     this.addCommand({
       id: "open-daily-card-calendar",
-      name: "Open daily card calendar",
+      name: "Open Home page",
       callback: () => this.activateView(),
     });
 
@@ -65,18 +66,121 @@ module.exports = class DailyCardCalendarPlugin extends Plugin {
     }
 
     this.app.workspace.revealLeaf(leaf);
+    return leaf;
   }
 
   async openAsHomePage() {
-    await this.activateView();
-    this.collapseLeftSidebar();
+    const calendarLeaf = await this.activateView();
+    await this.openHomeRightFile(calendarLeaf);
+    this.collapseSidebars();
   }
 
-  collapseLeftSidebar() {
+  collapseSidebars() {
     const leftSplit = this.app.workspace.leftSplit;
     if (leftSplit && !leftSplit.collapsed && typeof leftSplit.collapse === "function") {
       leftSplit.collapse();
     }
+
+    const rightSplit = this.app.workspace.rightSplit;
+    if (rightSplit && !rightSplit.collapsed && typeof rightSplit.collapse === "function") {
+      rightSplit.collapse();
+    }
+  }
+
+  async openHomeRightFile(calendarLeaf) {
+    const path = (this.settings.homeRightFile || "").trim();
+    if (!path) return;
+
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (!(file instanceof TFile)) {
+      new Notice(`未找到主页右侧文件：${path}`);
+      return;
+    }
+
+    const existingLeaf = this.findOpenFileLeaf(path);
+    if (existingLeaf) {
+      this.app.workspace.revealLeaf(existingLeaf);
+      this.resetHomeRightExcalidrawView(existingLeaf);
+      this.app.workspace.revealLeaf(calendarLeaf);
+      return;
+    }
+
+    this.app.workspace.revealLeaf(calendarLeaf);
+    const rightLeaf = this.app.workspace.getLeaf("split");
+    await rightLeaf.openFile(file);
+    this.resetHomeRightExcalidrawView(rightLeaf);
+    this.app.workspace.revealLeaf(calendarLeaf);
+  }
+
+  resetHomeRightExcalidrawView(leaf) {
+    [0, 100, 300, 800, 1500, 3000, 5000].forEach((delay) => {
+      window.setTimeout(() => this.applyExcalidrawHomeViewport(leaf), delay);
+    });
+  }
+
+  applyExcalidrawHomeViewport(leaf) {
+    const view = leaf && leaf.view;
+    const api = view && view.excalidrawAPI;
+    if (!api || typeof api.updateScene !== "function") return;
+
+    if (typeof view.preventAutozoom === "function") {
+      view.preventAutozoom();
+    } else if (view.semaphores) {
+      view.semaphores.preventAutozoom = true;
+      window.setTimeout(() => {
+        if (view.semaphores) view.semaphores.preventAutozoom = false;
+      }, 1500);
+    }
+
+    const elements = this.getExcalidrawContentElements(api);
+    this.updateExcalidrawZoom(view, api, 1);
+
+    if (elements.length > 0 && typeof api.scrollToContent === "function") {
+      window.setTimeout(() => {
+        api.scrollToContent(elements);
+        this.updateExcalidrawZoom(view, api, 1);
+      }, 50);
+    }
+  }
+
+  updateExcalidrawZoom(view, api, value) {
+    const update = { appState: { zoom: { value } }, captureUpdate: "NEVER" };
+    if (typeof view.updateScene === "function") {
+      view.updateScene(update);
+    } else {
+      api.updateScene(update);
+    }
+  }
+
+  getExcalidrawContentElements(api) {
+    if (typeof api.getSceneElements !== "function") return [];
+
+    return api.getSceneElements().filter((element) => {
+      return element
+        && !element.isDeleted
+        && typeof element.x === "number"
+        && typeof element.y === "number";
+    });
+  }
+
+  findOpenFileLeaf(path) {
+    const leaves = this.app.workspace.getLeavesOfType("markdown");
+    const allLeaves = typeof this.app.workspace.iterateAllLeaves === "function"
+      ? this.getAllLeaves()
+      : leaves;
+
+    return allLeaves.find((leaf) => {
+      const file = leaf.view && leaf.view.file;
+      return file && file.path === path;
+    });
+  }
+
+  getAllLeaves() {
+    const leaves = [];
+    this.app.workspace.iterateAllLeaves((leaf) => {
+      leaves.push(leaf);
+    });
+    return leaves;
   }
 
   async applyTemplateToNewBlankNote(file) {
@@ -206,7 +310,7 @@ class DailyCardCalendarView extends ItemView {
   }
 
   getDisplayText() {
-    return "Daily Card Calendar";
+    return "Home page";
   }
 
   getIcon() {
@@ -252,16 +356,27 @@ class DailyCardCalendarView extends ItemView {
     });
     this.createButton(actions, "refresh-cw", "刷新", () => this.render());
 
+    const indexedNotes = this.indexNotes();
+    if (indexedNotes.pinned.length > 0) {
+      const pinnedSection = container.createDiv({ cls: "dcc-pinned-section" });
+      const pinnedGrid = pinnedSection.createDiv({ cls: "dcc-grid" });
+      pinnedGrid.style.setProperty("--dcc-card-min", `${this.plugin.settings.cardMinWidth || DEFAULT_SETTINGS.cardMinWidth}px`);
+
+      for (const item of indexedNotes.pinned) {
+        await this.renderCard(pinnedGrid, null, item.file, { pinned: true, pinOrder: item.pinOrder });
+      }
+    }
+
     const weekSection = container.createDiv({ cls: "dcc-week-section" });
     weekSection.createEl("h3", {
-      cls: "dcc-week-heading",
+      cls: "dcc-section-heading",
       text: `第 ${this.currentWeek.isoWeek()} 周`,
     });
 
     const grid = weekSection.createDiv({ cls: "dcc-grid" });
-    grid.style.setProperty("--dcc-columns", String(this.plugin.settings.columns));
+    grid.style.setProperty("--dcc-card-min", `${this.plugin.settings.cardMinWidth || DEFAULT_SETTINGS.cardMinWidth}px`);
 
-    const notesByDate = this.indexDailyNotes();
+    const notesByDate = indexedNotes.byDate;
 
     for (let index = 0; index < 7; index += 1) {
       const day = this.currentWeek.clone().add(index, "days");
@@ -288,34 +403,65 @@ class DailyCardCalendarView extends ItemView {
     return button;
   }
 
-  indexDailyNotes() {
-    const map = new Map();
+  indexNotes() {
+    const byDate = new Map();
+    const pinned = [];
 
     for (const file of this.app.vault.getMarkdownFiles()) {
       const cache = this.app.metadataCache.getFileCache(file);
-      const frontmatterDate = cache && cache.frontmatter && (
-        cache.frontmatter.date ||
-        cache.frontmatter.created ||
-        cache.frontmatter.day
-      );
+      const frontmatter = cache && cache.frontmatter || {};
+      const isPinned = this.isTruthy(frontmatter.pinned);
+      if (isPinned) {
+        pinned.push({
+          file,
+          pinOrder: this.parsePinOrder(frontmatter.pinOrder),
+        });
+        continue;
+      }
+
+      const frontmatterDate = frontmatter.date || frontmatter.created || frontmatter.day;
       const date = this.parseDate(frontmatterDate) || this.parseDate(file.basename);
 
       if (date) {
         const key = date.format("YYYY-MM-DD");
-        const files = map.get(key) || [];
+        const files = byDate.get(key) || [];
         files.push(file);
-        map.set(key, files);
+        byDate.set(key, files);
       }
     }
 
-    for (const files of map.values()) {
+    pinned.sort((a, b) => {
+      const orderA = a.pinOrder === null ? Number.POSITIVE_INFINITY : a.pinOrder;
+      const orderB = b.pinOrder === null ? Number.POSITIVE_INFINITY : b.pinOrder;
+      if (orderA !== orderB) return orderA - orderB;
+      return a.file.basename.localeCompare(b.file.basename, undefined, {
+        numeric: true,
+        sensitivity: "base",
+      });
+    });
+
+    for (const files of byDate.values()) {
       files.sort((a, b) => a.basename.localeCompare(b.basename, undefined, {
         numeric: true,
         sensitivity: "base",
       }));
     }
 
-    return map;
+    return { pinned, byDate };
+  }
+
+  isTruthy(value) {
+    if (value === true) return true;
+    if (typeof value === "string") {
+      return ["true", "yes", "1"].includes(value.trim().toLowerCase());
+    }
+    return false;
+  }
+
+  parsePinOrder(value) {
+    if (value === null || value === undefined || value === "") return null;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
   }
 
   normalizeFolder(folder) {
@@ -355,9 +501,10 @@ class DailyCardCalendarView extends ItemView {
     return parsed.isValid() ? parsed : null;
   }
 
-  async renderCard(parent, day, file) {
+  async renderCard(parent, day, file, options = {}) {
     const card = parent.createDiv({ cls: "dcc-card" });
-    if (day.isSame(moment(), "day")) card.addClass("is-today");
+    if (options.pinned) card.addClass("is-pinned");
+    if (day && day.isSame(moment(), "day")) card.addClass("is-today");
 
     const body = card.createDiv({ cls: "dcc-card-body" });
     const quickActions = body.createDiv({ cls: "dcc-card-actions" });
@@ -372,7 +519,7 @@ class DailyCardCalendarView extends ItemView {
     });
     this.createButton(quickActions, "more-horizontal", "更多", (event) => {
       event.stopPropagation();
-      new Notice(day.format("YYYY-MM-DD"));
+      new Notice(options.pinned ? "常驻卡片" : day.format("YYYY-MM-DD"));
     });
 
     if (file) {
@@ -390,14 +537,14 @@ class DailyCardCalendarView extends ItemView {
 
     const footer = card.createDiv({ cls: "dcc-card-footer" });
     const footerIcon = footer.createSpan({ cls: "dcc-footer-icon" });
-    setIcon(footerIcon, "calendar-days");
+    setIcon(footerIcon, options.pinned ? "pin" : "calendar-days");
     footer.createSpan({
       cls: "dcc-date-label",
-      text: day.format("MMMM D, YYYY"),
+      text: options.pinned ? "常驻" : day.format("MMMM D, YYYY"),
     });
     footer.createSpan({
       cls: "dcc-weekday",
-      text: day.format("dddd"),
+      text: options.pinned ? (options.pinOrder != null ? `#${options.pinOrder}` : "") : day.format("dddd"),
     });
   }
 
@@ -496,7 +643,7 @@ class DailyCardCalendarSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
 
-    containerEl.createEl("h2", { text: "Daily Card Calendar" });
+    containerEl.createEl("h2", { text: "Home page" });
 
     new Setting(containerEl)
       .setName("Daily notes folder")
@@ -537,15 +684,28 @@ class DailyCardCalendarSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Columns")
-      .setDesc("Preferred desktop grid columns.")
+      .setName("Home right file")
+      .setDesc("File opened on the right split when Obsidian starts.")
+      .addText((text) =>
+        text
+          .setPlaceholder("随机漫步.excalidraw.md")
+          .setValue(this.plugin.settings.homeRightFile)
+          .onChange(async (value) => {
+            this.plugin.settings.homeRightFile = value.trim() || DEFAULT_SETTINGS.homeRightFile;
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName("Card minimum width")
+      .setDesc("Cards automatically wrap based on the current pane width.")
       .addSlider((slider) =>
         slider
-          .setLimits(2, 7, 1)
+          .setLimits(140, 240, 4)
           .setDynamicTooltip()
-          .setValue(Number(this.plugin.settings.columns))
+          .setValue(Number(this.plugin.settings.cardMinWidth || DEFAULT_SETTINGS.cardMinWidth))
           .onChange(async (value) => {
-            this.plugin.settings.columns = value;
+            this.plugin.settings.cardMinWidth = value;
             await this.plugin.saveSettings();
           })
       );
