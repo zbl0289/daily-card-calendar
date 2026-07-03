@@ -171,6 +171,124 @@
   background: var(--dcc-panel);
 }
 
+
+.dcc-preview.has-embed {
+  padding: 0;
+  overflow: hidden;
+  justify-content: stretch;
+}
+
+.dcc-preview.has-embed > p {
+  display: none;
+}
+
+.dcc-embed-preview {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  background: var(--dcc-panel);
+}
+
+.dcc-embed-preview .markdown-embed,
+.dcc-embed-preview .internal-embed {
+  width: 100%;
+  height: 100%;
+  max-height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  overflow: hidden;
+}
+
+.dcc-embed-preview .markdown-embed-title,
+.dcc-embed-preview .markdown-embed-link,
+.dcc-embed-preview .file-embed-title {
+  display: none;
+}
+
+.dcc-embed-preview .markdown-embed-content,
+.dcc-embed-preview .markdown-preview-view,
+.dcc-embed-preview .markdown-preview-sizer {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  max-height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.dcc-embed-preview .excalidraw-svg {
+  width: calc(100% - 24px) !important;
+  height: calc(100% - 24px) !important;
+  display: grid;
+  place-items: center;
+  background: var(--background-primary);
+}
+
+.dcc-embed-preview svg,
+.dcc-embed-preview img,
+.dcc-embed-preview canvas {
+  width: 100% !important;
+  height: auto !important;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+.dcc-preview.has-excalidraw {
+  padding: 0;
+  overflow: hidden;
+  justify-content: stretch;
+}
+
+.dcc-preview.has-excalidraw > p {
+  display: none;
+}
+
+.dcc-excalidraw-preview {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background:
+    linear-gradient(var(--dcc-panel), var(--dcc-panel)) padding-box,
+    repeating-linear-gradient(
+      0deg,
+      color-mix(in srgb, var(--dcc-border) 48%, transparent) 0,
+      color-mix(in srgb, var(--dcc-border) 48%, transparent) 1px,
+      transparent 1px,
+      transparent 18px
+    ),
+    repeating-linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--dcc-border) 48%, transparent) 0,
+      color-mix(in srgb, var(--dcc-border) 48%, transparent) 1px,
+      transparent 1px,
+      transparent 18px
+    );
+}
+
+.dcc-excalidraw-text {
+  max-width: 100%;
+  white-space: pre-wrap;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 6;
+  -webkit-box-orient: vertical;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.3;
+  font-weight: 400;
+  text-align: center;
+}
 .dcc-preview.has-image {
   padding: 0;
   color: white;

@@ -1,5 +1,6 @@
 const {
   ItemView,
+  MarkdownRenderer,
   Notice,
   Plugin,
   PluginSettingTab,
@@ -550,61 +551,153 @@ class DailyCardCalendarView extends ItemView {
 
   async renderNotePreview(parent, file) {
     const content = await this.app.vault.cachedRead(file);
-    const image = this.extractFirstImage(content, file);
-    const title = this.extractTitle(content) || file.basename;
-    const excerpt = this.extractExcerpt(content);
+    const isExcalidraw = this.isExcalidrawFile(file);
+    const media = isExcalidraw ? { type: "excalidraw", file } : this.extractFirstPreviewMedia(content, file);
+    const title = isExcalidraw ? this.getExcalidrawDisplayTitle(file) : file.basename;
+    const excerpt = isExcalidraw ? "" : this.extractPreviewText(content, title);
 
     parent.createEl("h3", { cls: "dcc-note-title", text: title });
 
-    const preview = parent.createDiv({ cls: image ? "dcc-preview has-image" : "dcc-preview" });
-    if (image) {
+    const preview = parent.createDiv({ cls: media ? `dcc-preview has-${media.type}` : "dcc-preview" });
+    if (media && media.type === "image") {
       preview.createEl("img", {
         cls: "dcc-cover",
-        attr: { src: image, alt: title },
+        attr: { src: media.src, alt: title },
       });
+    } else if (media && media.type === "embed") {
+      const embed = preview.createDiv({ cls: "dcc-embed-preview" });
+      await MarkdownRenderer.renderMarkdown(media.markdown, embed, file.path, this);
+    } else if (media && media.type === "excalidraw") {
+      await this.renderExcalidrawCardPreview(preview, media.file);
     }
 
-    if (excerpt) preview.createEl("p", { text: excerpt });
+    if (excerpt && (!media || media.type !== "excalidraw")) preview.createEl("p", { text: excerpt });
   }
 
-  extractFirstImage(content, file) {
+  async renderExcalidrawCardPreview(parent, file) {
+    const content = await this.app.vault.cachedRead(file);
+    const texts = this.extractExcalidrawTextElements(content);
+    const preview = parent.createDiv({ cls: "dcc-excalidraw-preview" });
+    const label = texts.length > 0 ? texts.slice(0, 4).join("\n") : file.basename.replace(/\.excalidraw$/, "");
+    preview.createDiv({ cls: "dcc-excalidraw-text", text: label });
+  }
+
+  extractExcalidrawTextElements(content) {
+    const section = content.match(/## Text Elements\s*([\s\S]*?)(?:\n%%|\n## Drawing|$)/);
+    if (!section) return [];
+
+    return section[1]
+      .split("\n")
+      .map((line) => line.replace(/\s+\^[A-Za-z0-9_-]+\s*$/, "").trim())
+      .map((line) => this.cleanPreviewLine(line))
+      .filter(Boolean)
+      .filter((line) => this.isReadablePreviewText(line));
+  }
+
+  extractFirstPreviewMedia(content, file) {
     const wikiImage = content.match(/!\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/);
     if (wikiImage) {
-      const linked = this.app.metadataCache.getFirstLinkpathDest(wikiImage[1], file.path);
-      if (linked instanceof TFile) return this.app.vault.getResourcePath(linked);
+      const target = wikiImage[1].trim();
+      const linked = this.app.metadataCache.getFirstLinkpathDest(target, file.path);
+      if (linked instanceof TFile) {
+        if (this.isImageFile(linked)) {
+          return { type: "image", src: this.app.vault.getResourcePath(linked) };
+        }
+        if (this.isExcalidrawFile(linked)) {
+          return { type: "excalidraw", file: linked };
+        }
+        if (this.isMarkdownPreviewFile(linked)) {
+          return { type: "embed", markdown: `![[${target}]]` };
+        }
+      }
     }
 
     const markdownImage = content.match(/!\[[^\]]*]\(([^)]+)\)/);
     if (markdownImage) {
       const raw = markdownImage[1].trim();
-      if (/^https?:\/\//i.test(raw) || raw.startsWith("app://")) return raw;
+      if (/^https?:\/\//i.test(raw) || raw.startsWith("app://")) {
+        return { type: "image", src: raw };
+      }
 
       const linked = this.app.metadataCache.getFirstLinkpathDest(decodeURIComponent(raw), file.path);
-      if (linked instanceof TFile) return this.app.vault.getResourcePath(linked);
+      if (linked instanceof TFile) {
+        if (this.isImageFile(linked)) {
+          return { type: "image", src: this.app.vault.getResourcePath(linked) };
+        }
+        if (this.isExcalidrawFile(linked)) {
+          return { type: "excalidraw", file: linked };
+        }
+        if (this.isMarkdownPreviewFile(linked)) {
+          return { type: "embed", markdown: `![[${linked.path}]]` };
+        }
+      }
     }
 
-    return "";
+    return null;
   }
 
+  isReadablePreviewText(line) {
+    if (!line) return false;
+    if (/^(Element Links|Drawing|Excalidraw Data|Text Elements|Embedded Files)$/i.test(line)) return false;
+    if (/[!]?\[\[|\]\]/.test(line)) return false;
+    if (/!\[[^\]]*]\([^)]+\)/.test(line)) return false;
+    if (/\.(excalidraw|excalidrawlib|md|png|jpe?g|gif|webp|svg)\b/i.test(line)) return false;
+    if (!/[\p{L}\p{N}]/u.test(line)) return false;
+    return true;
+  }
+
+  isImageFile(file) {
+    return ["avif", "bmp", "gif", "jpeg", "jpg", "png", "svg", "webp"].includes(file.extension.toLowerCase());
+  }
+
+  isExcalidrawFile(file) {
+    return file.extension === "md" && file.basename.endsWith(".excalidraw");
+  }
+
+  getExcalidrawDisplayTitle(file) {
+    return file.basename.replace(/\.excalidraw$/, "");
+  }
+
+  isMarkdownPreviewFile(file) {
+    return file.extension === "md";
+  }
   extractTitle(content) {
     const title = content.match(/^#\s+(.+)$/m);
     return title ? title[1].trim() : "";
   }
 
-  extractExcerpt(content) {
+  extractPreviewText(content, title) {
+    const normalizedTitle = title.trim();
     return content
       .replace(/^---[\s\S]*?---\s*/m, "")
       .replace(/!\[\[[^\]]+\]\]/g, "")
       .replace(/!\[[^\]]*]\([^)]+\)/g, "")
-      .replace(/^#\s+.+$/gm, "")
       .split("\n")
-      .map((line) => line.trim())
+      .map((line) => this.cleanPreviewLine(line))
       .filter(Boolean)
-      .slice(0, 2)
+      .filter((line) => line !== normalizedTitle)
+      .slice(0, 1)
       .join(" ")
       .slice(0, 120);
   }
 
+  cleanPreviewLine(line) {
+    return line
+      .trim()
+      .replace(/^#{1,6}\s*/, "")
+      .replace(/^>+\s*/, "")
+      .replace(/^[-*+]\s+/, "")
+      .replace(/^\d+[.)]\s+/, "")
+      .replace(/^[-*_]{3,}\s*$/, "")
+      .replace(/`([^`]+)`/g, "$1")
+      .replace(/\*\*([^*]+)\*\*/g, "$1")
+      .replace(/__([^_]+)__/g, "$1")
+      .replace(/\*([^*]+)\*/g, "$1")
+      .replace(/_([^_]+)_/g, "$1")
+      .replace(/\[([^\]]+)]\([^)]+\)/g, "$1")
+      .replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_match, page, alias) => alias || page)
+      .trim();
+  }
   async createDailyNote(day) {
     const folder = this.getDailyFolder();
     const filename = `${day.format(this.plugin.settings.dateFormat)}.md`;
