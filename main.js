@@ -17,6 +17,7 @@ const DEFAULT_SETTINGS = {
   dailyFolder: "",
   dateFormat: "YYYY-MM-DD",
   applyTemplateToNewNotes: true,
+  homeRightFolder: "0-本质",
   homeRightFile: "随机漫步.excalidraw.md",
   cardMinWidth: 172,
 };
@@ -31,13 +32,13 @@ module.exports = class DailyCardCalendarPlugin extends Plugin {
     );
 
     this.addRibbonIcon("calendar-days", "Open Home page", () => {
-      this.activateView();
+      this.openAsHomePage();
     });
 
     this.addCommand({
       id: "open-daily-card-calendar",
       name: "Open Home page",
-      callback: () => this.activateView(),
+      callback: () => this.openAsHomePage(),
     });
 
     this.addSettingTab(new DailyCardCalendarSettingTab(this.app, this));
@@ -88,8 +89,17 @@ module.exports = class DailyCardCalendarPlugin extends Plugin {
     }
   }
 
+  getHomeRightFilePath() {
+    const fileName = (this.settings.homeRightFile || "").trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+    if (!fileName) return "";
+    if (fileName.includes("/")) return fileName;
+
+    const folder = this.normalizeFolder(this.settings.homeRightFolder);
+    return folder ? `${folder}/${fileName}` : fileName;
+  }
+
   async openHomeRightFile(calendarLeaf) {
-    const path = (this.settings.homeRightFile || "").trim();
+    const path = this.getHomeRightFilePath();
     if (!path) return;
 
     const file = this.app.vault.getAbstractFileByPath(path);
@@ -250,7 +260,7 @@ module.exports = class DailyCardCalendarPlugin extends Plugin {
     } else {
       content = [
         "---",
-        `date: ${day.format("YYYY-MM-DD")}`,
+        `homepage-date: ${day.format("YYYY-MM-DD")}`,
         "---",
         "",
         `# ${day.format("MMMM D, YYYY")}`,
@@ -259,7 +269,7 @@ module.exports = class DailyCardCalendarPlugin extends Plugin {
     }
 
     const rendered = this.renderTemplateVariables(content, day, title);
-    return this.ensureDateFrontmatter(rendered, day);
+    return this.ensureHomepageDateFrontmatter(rendered, day);
   }
 
   renderTemplateVariables(content, day, title) {
@@ -273,14 +283,14 @@ module.exports = class DailyCardCalendarPlugin extends Plugin {
       .replace(/{{\s*title\s*}}/g, title);
   }
 
-  ensureDateFrontmatter(content, day) {
-    const dateLine = `date: ${day.format("YYYY-MM-DD")}`;
+  ensureHomepageDateFrontmatter(content, day) {
+    const dateLine = `homepage-date: ${day.format("YYYY-MM-DD")}`;
 
     if (content.startsWith("---\n")) {
       const end = content.indexOf("\n---", 4);
       if (end !== -1) {
         const frontmatter = content.slice(4, end);
-        if (/^date\s*:/m.test(frontmatter)) return content;
+        if (/^homepage-date\s*:/m.test(frontmatter)) return content;
         return `---\n${dateLine}\n${frontmatter}${content.slice(end)}`;
       }
     }
@@ -411,16 +421,16 @@ class DailyCardCalendarView extends ItemView {
     for (const file of this.app.vault.getMarkdownFiles()) {
       const cache = this.app.metadataCache.getFileCache(file);
       const frontmatter = cache && cache.frontmatter || {};
-      const isPinned = this.isTruthy(frontmatter.pinned);
+      const isPinned = this.isTruthy(frontmatter["homepage-pinned"]);
       if (isPinned) {
         pinned.push({
           file,
-          pinOrder: this.parsePinOrder(frontmatter.pinOrder),
+          pinOrder: this.parsePinOrder(frontmatter["homepage-pin-order"]),
         });
         continue;
       }
 
-      const frontmatterDate = frontmatter.date || frontmatter.created || frontmatter.day;
+      const frontmatterDate = frontmatter["homepage-date"];
       const date = this.parseDate(frontmatterDate) || this.parseDate(file.basename);
 
       if (date) {
@@ -736,14 +746,14 @@ class DailyCardCalendarSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
 
-    containerEl.createEl("h2", { text: "Home page" });
+    containerEl.createEl("h2", { text: "主页" });
 
     new Setting(containerEl)
-      .setName("Daily notes folder")
-      .setDesc("Leave empty to use Obsidian's Daily notes folder.")
+      .setName("日记文件夹")
+      .setDesc("留空时使用 Obsidian 核心日记插件的文件夹。")
       .addText((text) =>
         text
-          .setPlaceholder("Journal/Daily")
+          .setPlaceholder("日记")
           .setValue(this.plugin.settings.dailyFolder)
           .onChange(async (value) => {
             this.plugin.settings.dailyFolder = value.trim();
@@ -752,8 +762,8 @@ class DailyCardCalendarSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Daily note date format")
-      .setDesc("Used for matching and creating daily note file names.")
+      .setName("日记日期格式")
+      .setDesc("用于匹配和创建日记文件名。")
       .addText((text) =>
         text
           .setPlaceholder("YYYY-MM-DD")
@@ -765,8 +775,8 @@ class DailyCardCalendarSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Apply template to new blank notes")
-      .setDesc("When a new empty Markdown note is created, fill it with the same template used by Daily notes.")
+      .setName("给新建空白笔记套用模板")
+      .setDesc("新建空白 Markdown 笔记时，自动填入日记模板内容。")
       .addToggle((toggle) =>
         toggle
           .setValue(Boolean(this.plugin.settings.applyTemplateToNewNotes))
@@ -777,8 +787,21 @@ class DailyCardCalendarSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Home right file")
-      .setDesc("File opened on the right split when Obsidian starts.")
+      .setName("主页右侧文件夹")
+      .setDesc("右侧文件所在的库内文件夹路径，留空则从库根目录查找。")
+      .addText((text) =>
+        text
+          .setPlaceholder("0-本质")
+          .setValue(this.plugin.settings.homeRightFolder || "")
+          .onChange(async (value) => {
+            this.plugin.settings.homeRightFolder = this.plugin.normalizeFolder(value);
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName("主页右侧文件")
+      .setDesc("Obsidian 启动或重新打开主页时，在右侧分屏打开的文件名。")
       .addText((text) =>
         text
           .setPlaceholder("随机漫步.excalidraw.md")
@@ -790,8 +813,8 @@ class DailyCardCalendarSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Card minimum width")
-      .setDesc("Cards automatically wrap based on the current pane width.")
+      .setName("卡片最小宽度")
+      .setDesc("卡片会根据当前面板宽度自动换行。")
       .addSlider((slider) =>
         slider
           .setLimits(140, 240, 4)
