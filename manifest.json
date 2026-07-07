@@ -1,9 +1,9 @@
 {
   "id": "daily-card-calendar",
-  "name": "Home page",
-  "version": "0.10.12",
+  "name": "Homepage",
+  "version": "0.10.13",
   "minAppVersion": "1.5.0",
-  "description": "A card-style daily note calendar view with image previews and empty-day placeholders.",
+  "description": "A Homepage card-style daily note calendar view with image previews and empty-day placeholders.",
   "author": "Codex",
   "isDesktopOnly": false
 }

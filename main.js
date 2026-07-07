@@ -17,9 +17,13 @@ const DEFAULT_SETTINGS = {
   dailyFolder: "",
   dateFormat: "YYYY-MM-DD",
   applyTemplateToNewNotes: true,
+  homeLeftType: "homepage",
+  homeLeftFolder: "",
+  homeLeftFile: "",
+  homeRightType: "file",
   homeRightFolder: "0-本质",
   homeRightFile: "随机漫步.excalidraw.md",
-  cardMinWidth: 172,
+  cardMinWidth: 240,
 };
 
 module.exports = class DailyCardCalendarPlugin extends Plugin {
@@ -31,13 +35,13 @@ module.exports = class DailyCardCalendarPlugin extends Plugin {
       (leaf) => new DailyCardCalendarView(leaf, this)
     );
 
-    this.addRibbonIcon("calendar-days", "Open Home page", () => {
+    this.addRibbonIcon("calendar-days", "Open Homepage", () => {
       this.openAsHomePage();
     });
 
     this.addCommand({
       id: "open-daily-card-calendar",
-      name: "Open Home page",
+      name: "Open Homepage",
       callback: () => this.openAsHomePage(),
     });
 
@@ -50,7 +54,7 @@ module.exports = class DailyCardCalendarPlugin extends Plugin {
     );
 
     this.app.workspace.onLayoutReady(async () => {
-      await this.openAsHomePage();
+      await this.openHomeLayout();
     });
   }
 
@@ -72,9 +76,103 @@ module.exports = class DailyCardCalendarPlugin extends Plugin {
   }
 
   async openAsHomePage() {
-    const calendarLeaf = await this.activateView();
-    await this.openHomeRightFile(calendarLeaf);
-    this.collapseSidebars();
+    await this.openHomeLayout();
+  }
+
+  async openHomeLayout() {
+    const leftLeaf = await this.openHomeTarget("left", null);
+    const rightLeaf = await this.openHomeTarget("right", leftLeaf);
+    const activeLeaf = leftLeaf || rightLeaf;
+
+    if (activeLeaf) {
+      this.app.workspace.revealLeaf(activeLeaf);
+      this.collapseSidebars();
+    }
+  }
+
+  async openHomeTarget(side, sourceLeaf) {
+    const target = this.getHomeTarget(side);
+    if (target.type === "none") return null;
+
+    if (target.type === "homepage") {
+      return this.openHomePageTarget(side, sourceLeaf);
+    }
+
+
+    return this.openFileTarget(this.getHomeFilePath(side), side, sourceLeaf);
+  }
+
+  getHomeTarget(side) {
+    const prefix = side === "left" ? "homeLeft" : "homeRight";
+    return {
+      type: this.normalizeHomeTargetType(this.settings[`${prefix}Type`]),
+    };
+  }
+
+  normalizeHomeTargetType(type) {
+    return ["none", "homepage", "file"].includes(type) ? type : "none";
+  }
+
+  async openHomePageTarget(side, sourceLeaf) {
+    const existingLeaf = this.app.workspace.getLeavesOfType(VIEW_TYPE)[0];
+    if (existingLeaf && existingLeaf !== sourceLeaf) {
+      this.app.workspace.revealLeaf(existingLeaf);
+      return existingLeaf;
+    }
+
+    const leaf = await this.getHomeLayoutLeaf(side, sourceLeaf);
+    await leaf.setViewState({ type: VIEW_TYPE, active: true });
+    this.app.workspace.revealLeaf(leaf);
+    return leaf;
+  }
+
+  async openFileTarget(path, side, sourceLeaf) {
+    if (!path) return null;
+
+    const resolved = this.resolveHomeFilePath(path);
+    if (!resolved.file) {
+      new Notice(`未找到主页${side === "left" ? "左侧" : "右侧"}文件：${path}`);
+      return null;
+    }
+
+    const existingLeaf = this.findOpenFileLeaf(resolved.path);
+    if (existingLeaf && existingLeaf !== sourceLeaf) {
+      this.app.workspace.revealLeaf(existingLeaf);
+      this.resetHomeRightExcalidrawView(existingLeaf);
+      return existingLeaf;
+    }
+
+    const leaf = await this.getHomeLayoutLeaf(side, sourceLeaf);
+    await leaf.openFile(resolved.file);
+    this.resetHomeRightExcalidrawView(leaf);
+    return leaf;
+  }
+
+  resolveHomeFilePath(path) {
+    const normalized = (path || "").trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+    const candidates = [normalized];
+
+    if (normalized.endsWith(".excalidraw") && !normalized.endsWith(".excalidraw.md")) {
+      candidates.push(`${normalized}.md`);
+    }
+
+    for (const candidate of candidates) {
+      const file = this.app.vault.getAbstractFileByPath(candidate);
+      if (file instanceof TFile) {
+        return { file, path: candidate };
+      }
+    }
+
+    return { file: null, path: normalized };
+  }
+
+  async getHomeLayoutLeaf(side, sourceLeaf) {
+    if (side === "right") {
+      if (sourceLeaf) this.app.workspace.revealLeaf(sourceLeaf);
+      return this.app.workspace.getLeaf("split");
+    }
+
+    return this.app.workspace.getLeaf("tab");
   }
 
   collapseSidebars() {
@@ -89,38 +187,22 @@ module.exports = class DailyCardCalendarPlugin extends Plugin {
     }
   }
 
-  getHomeRightFilePath() {
-    const fileName = (this.settings.homeRightFile || "").trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+  getHomeFilePath(side) {
+    const prefix = side === "left" ? "homeLeft" : "homeRight";
+    const fileName = (this.settings[`${prefix}File`] || "").trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
     if (!fileName) return "";
     if (fileName.includes("/")) return fileName;
 
-    const folder = this.normalizeFolder(this.settings.homeRightFolder);
+    const folder = this.normalizeFolder(this.settings[`${prefix}Folder`]);
     return folder ? `${folder}/${fileName}` : fileName;
   }
 
+  getHomeRightFilePath() {
+    return this.getHomeFilePath("right");
+  }
+
   async openHomeRightFile(calendarLeaf) {
-    const path = this.getHomeRightFilePath();
-    if (!path) return;
-
-    const file = this.app.vault.getAbstractFileByPath(path);
-    if (!(file instanceof TFile)) {
-      new Notice(`未找到主页右侧文件：${path}`);
-      return;
-    }
-
-    const existingLeaf = this.findOpenFileLeaf(path);
-    if (existingLeaf) {
-      this.app.workspace.revealLeaf(existingLeaf);
-      this.resetHomeRightExcalidrawView(existingLeaf);
-      this.app.workspace.revealLeaf(calendarLeaf);
-      return;
-    }
-
-    this.app.workspace.revealLeaf(calendarLeaf);
-    const rightLeaf = this.app.workspace.getLeaf("split");
-    await rightLeaf.openFile(file);
-    this.resetHomeRightExcalidrawView(rightLeaf);
-    this.app.workspace.revealLeaf(calendarLeaf);
+    return this.openFileTarget(this.getHomeRightFilePath(), "right", calendarLeaf);
   }
 
   resetHomeRightExcalidrawView(leaf) {
@@ -321,7 +403,7 @@ class DailyCardCalendarView extends ItemView {
   }
 
   getDisplayText() {
-    return "Home page";
+    return "Homepage";
   }
 
   getIcon() {
@@ -518,20 +600,6 @@ class DailyCardCalendarView extends ItemView {
     if (day && day.isSame(moment(), "day")) card.addClass("is-today");
 
     const body = card.createDiv({ cls: "dcc-card-body" });
-    const quickActions = body.createDiv({ cls: "dcc-card-actions" });
-    this.createButton(quickActions, "external-link", "打开笔记", async (event) => {
-      event.stopPropagation();
-      const target = file || await this.createDailyNote(day);
-      await this.app.workspace.getLeaf("tab").openFile(target);
-    });
-    this.createButton(quickActions, "info", "显示信息", (event) => {
-      event.stopPropagation();
-      new Notice(file ? file.path : "当天无记录");
-    });
-    this.createButton(quickActions, "more-horizontal", "更多", (event) => {
-      event.stopPropagation();
-      new Notice(options.pinned ? "常驻卡片" : day.format("YYYY-MM-DD"));
-    });
 
     if (file) {
       await this.renderNotePreview(body, file);
@@ -746,7 +814,7 @@ class DailyCardCalendarSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
 
-    containerEl.createEl("h2", { text: "主页" });
+    containerEl.createEl("h2", { text: "Homepage" });
 
     new Setting(containerEl)
       .setName("日记文件夹")
@@ -786,38 +854,15 @@ class DailyCardCalendarSettingTab extends PluginSettingTab {
           })
       );
 
-    new Setting(containerEl)
-      .setName("主页右侧文件夹")
-      .setDesc("右侧文件所在的库内文件夹路径，留空则从库根目录查找。")
-      .addText((text) =>
-        text
-          .setPlaceholder("0-本质")
-          .setValue(this.plugin.settings.homeRightFolder || "")
-          .onChange(async (value) => {
-            this.plugin.settings.homeRightFolder = this.plugin.normalizeFolder(value);
-            await this.plugin.saveSettings();
-          })
-      );
-
-    new Setting(containerEl)
-      .setName("主页右侧文件")
-      .setDesc("Obsidian 启动或重新打开主页时，在右侧分屏打开的文件名。")
-      .addText((text) =>
-        text
-          .setPlaceholder("随机漫步.excalidraw.md")
-          .setValue(this.plugin.settings.homeRightFile)
-          .onChange(async (value) => {
-            this.plugin.settings.homeRightFile = value.trim() || DEFAULT_SETTINGS.homeRightFile;
-            await this.plugin.saveSettings();
-          })
-      );
+    this.displayHomeTargetSettings(containerEl, "left", "左屏");
+    this.displayHomeTargetSettings(containerEl, "right", "右屏");
 
     new Setting(containerEl)
       .setName("卡片最小宽度")
       .setDesc("卡片会根据当前面板宽度自动换行。")
       .addSlider((slider) =>
         slider
-          .setLimits(140, 240, 4)
+          .setLimits(200, 320, 4)
           .setDynamicTooltip()
           .setValue(Number(this.plugin.settings.cardMinWidth || DEFAULT_SETTINGS.cardMinWidth))
           .onChange(async (value) => {
@@ -825,5 +870,78 @@ class DailyCardCalendarSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           })
       );
+  }
+
+  displayHomeTargetSettings(containerEl, side, label) {
+    const prefix = side === "left" ? "homeLeft" : "homeRight";
+    const currentPath = this.plugin.getHomeFilePath(side);
+
+    new Setting(containerEl)
+      .setName(`${label}打开内容`)
+      .setDesc("设置为不打开、Homepage 或库内文档。")
+      .addDropdown((dropdown) =>
+        dropdown
+          .addOption("none", "不打开")
+          .addOption("homepage", "Homepage")
+          .addOption("file", "文档")
+          .setValue(this.plugin.normalizeHomeTargetType(this.plugin.settings[`${prefix}Type`]))
+          .onChange(async (value) => {
+            this.plugin.settings[`${prefix}Type`] = value;
+            if (value !== "file") {
+              this.setHomeFilePath(prefix, "");
+            }
+            await this.plugin.saveSettings();
+            this.display();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName(`${label}文档`)
+      .setDesc("选择文档时使用。可以直接输入库内路径，也可以从下拉列表选择。")
+      .addText((text) =>
+        text
+          .setPlaceholder("")
+          .setValue(currentPath)
+          .onChange(async (value) => {
+            this.setHomeFilePath(prefix, value);
+            await this.plugin.saveSettings();
+          })
+      )
+      .addDropdown((dropdown) => {
+        const files = this.getDocumentFiles();
+        const hasCurrent = files.some((file) => file.path === currentPath);
+
+        dropdown.addOption("", "选择文档...");
+        for (const file of files) {
+          dropdown.addOption(file.path, file.path);
+        }
+
+        dropdown
+          .setValue(hasCurrent ? currentPath : "")
+          .onChange(async (value) => {
+            if (!value) return;
+            this.setHomeFilePath(prefix, value);
+            await this.plugin.saveSettings();
+            this.display();
+          });
+      });
+  }
+
+  getDocumentFiles() {
+    const files = typeof this.app.vault.getFiles === "function"
+      ? this.app.vault.getFiles()
+      : this.app.vault.getMarkdownFiles();
+
+    return files
+      .filter((file) => file instanceof TFile)
+      .sort((a, b) => a.path.localeCompare(b.path, undefined, {
+        numeric: true,
+        sensitivity: "base",
+      }));
+  }
+
+  setHomeFilePath(prefix, value) {
+    this.plugin.settings[`${prefix}Folder`] = "";
+    this.plugin.settings[`${prefix}File`] = value.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
   }
 }

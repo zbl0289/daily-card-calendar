@@ -4,7 +4,7 @@
   --dcc-accent: var(--interactive-accent);
   --dcc-panel: var(--background-secondary);
   --dcc-card: var(--background-primary);
-  --dcc-card-min: 172px;
+  --dcc-card-min: 240px;
   height: 100%;
   padding: 14px;
   overflow: auto;
@@ -42,8 +42,7 @@
   color: var(--text-muted);
 }
 
-.dcc-toolbar-actions,
-.dcc-card-actions {
+.dcc-toolbar-actions {
   display: flex;
   gap: 6px;
 }
@@ -56,7 +55,7 @@
 }
 
 .dcc-card {
-  min-height: 274px;
+  min-height: 300px;
   display: grid;
   grid-template-rows: 1fr 36px;
   overflow: hidden;
@@ -82,22 +81,8 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  min-height: 238px;
+  min-height: 264px;
   background: var(--dcc-panel);
-}
-
-.dcc-card-actions {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  z-index: 2;
-  opacity: 0;
-  transition: opacity 120ms ease;
-}
-
-.dcc-card:hover .dcc-card-actions,
-.dcc-card.is-today .dcc-card-actions {
-  opacity: 1;
 }
 
 .dcc-icon-button {
@@ -139,7 +124,7 @@
 
 .dcc-note-title {
   margin: 0;
-  padding: 16px 54px 10px 20px;
+  padding: 16px 20px 10px;
   min-height: 46px;
   color: var(--text-normal);
   background: color-mix(in srgb, var(--background-secondary) 92%, transparent);
@@ -316,35 +301,35 @@
 
 .dcc-card-footer {
   display: grid;
-  grid-template-columns: 16px auto 1fr;
+  grid-template-columns: 16px max-content max-content;
   align-items: center;
   gap: 6px;
   min-width: 0;
-  padding: 0 16px;
+  padding: 0 12px;
   border-top: 1px solid var(--dcc-border);
   background: var(--background-primary);
 }
 
 .dcc-date-label {
-  min-width: 0;
-  overflow: hidden;
+  min-width: max-content;
+  overflow: visible;
   white-space: nowrap;
-  text-overflow: ellipsis;
+  text-overflow: clip;
   font-weight: 650;
 }
 
 .dcc-weekday {
   justify-self: end;
-  min-width: 0;
-  overflow: hidden;
+  min-width: max-content;
+  overflow: visible;
   white-space: nowrap;
   color: var(--link-color);
-  font-size: 13px;
+  font-size: 12px;
 }
 
 @media (max-width: 1100px) {
   .dcc-root {
-    --dcc-card-min: 160px;
+    --dcc-card-min: 220px;
   }
 }
 
